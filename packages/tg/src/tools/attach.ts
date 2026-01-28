@@ -20,9 +20,17 @@ export const attachTool: AgentTool<typeof attachSchema> = {
 	label: "Attach",
 	description: "Send a file to the user via Telegram. Use for sharing generated files, images, documents, etc.",
 	parameters: attachSchema,
-	async execute(_toolCallId, { path, caption }) {
+	execute: async (
+		_toolCallId: string,
+		{ path, caption }: { label: string; path: string; caption?: string },
+		signal?: AbortSignal,
+	) => {
 		if (!uploadFunction) {
 			throw new Error("Upload function not configured");
+		}
+
+		if (signal?.aborted) {
+			throw new Error("Operation aborted");
 		}
 
 		const absolutePath = resolvePath(path);
@@ -38,7 +46,8 @@ export const attachTool: AgentTool<typeof attachSchema> = {
 
 		await uploadFunction(absolutePath, caption);
 		return {
-			content: [{ type: "text", text: `Sent file: ${basename(absolutePath)}` }],
+			content: [{ type: "text" as const, text: `Sent file: ${basename(absolutePath)}` }],
+			details: undefined,
 		};
 	},
 };
