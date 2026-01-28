@@ -1,55 +1,44 @@
 import { Type } from "@sinclair/typebox";
 import { existsSync, statSync } from "fs";
-import { basename } from "path";
+import { basename, resolve as resolvePath } from "path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
 let uploadFunction: ((filePath: string, caption?: string) => Promise<void>) | undefined;
 
 export function setUploadFunction(fn: (filePath: string, caption?: string) => Promise<void>) {
-  uploadFunction = fn;
+	uploadFunction = fn;
 }
 
-export const attachTool: AgentTool<"attach"> = {
-  name: "attach",
-  label: "Attach",
-  description: "Send a file to the user via Telegram. Use for sharing generated files, images, documents, etc.",
-  parameters: Type.Object({
-    path: Type.String({ description: "Absolute path to the file to send" }),
-    caption: Type.Optional(Type.String({ description: "Optional caption for the file" })),
-  }),
-  async execute(id, { path, caption }) {
-    if (!uploadFunction) {
-      return {
-        content: [{ type: "text", text: "Upload function not configured" }],
-        isError: true,
-      };
-    }
+const attachSchema = Type.Object({
+	label: Type.String({ description: "Brief description of what you're sharing (shown to user)" }),
+	path: Type.String({ description: "Absolute path to the file to send" }),
+	caption: Type.Optional(Type.String({ description: "Optional caption for the file" })),
+});
 
-    if (!existsSync(path)) {
-      return {
-        content: [{ type: "text", text: `File not found: ${path}` }],
-        isError: true,
-      };
-    }
+export const attachTool: AgentTool<typeof attachSchema> = {
+	name: "attach",
+	label: "Attach",
+	description: "Send a file to the user via Telegram. Use for sharing generated files, images, documents, etc.",
+	parameters: attachSchema,
+	async execute(_toolCallId, { path, caption }) {
+		if (!uploadFunction) {
+			throw new Error("Upload function not configured");
+		}
 
-    const stats = statSync(path);
-    if (stats.size > 50 * 1024 * 1024) {
-      return {
-        content: [{ type: "text", text: `File too large (max 50MB): ${path}` }],
-        isError: true,
-      };
-    }
+		const absolutePath = resolvePath(path);
 
-    try {
-      await uploadFunction(path, caption);
-      return {
-        content: [{ type: "text", text: `Sent file: ${basename(path)}` }],
-      };
-    } catch (error) {
-      return {
-        content: [{ type: "text", text: `Failed to send file: ${error}` }],
-        isError: true,
-      };
-    }
-  },
+		if (!existsSync(absolutePath)) {
+			throw new Error(`File not found: ${absolutePath}`);
+		}
+
+		const stats = statSync(absolutePath);
+		if (stats.size > 50 * 1024 * 1024) {
+			throw new Error(`File too large (max 50MB): ${absolutePath}`);
+		}
+
+		await uploadFunction(absolutePath, caption);
+		return {
+			content: [{ type: "text", text: `Sent file: ${basename(absolutePath)}` }],
+		};
+	},
 };
