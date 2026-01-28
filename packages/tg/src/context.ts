@@ -1,13 +1,13 @@
 /**
- * Context management for mom.
+ * Context management for tg.
  *
- * Mom uses two files per channel:
+ * Tg uses two files per chat:
  * - context.jsonl: Structured API messages for LLM context (same format as coding-agent sessions)
- * - log.jsonl: Human-readable channel history for grep (no tool results)
+ * - log.jsonl: Human-readable chat history for grep (no tool results)
  *
  * This module provides:
  * - syncLogToSessionManager: Syncs messages from log.jsonl to SessionManager
- * - MomSettingsManager: Simple settings for mom (compaction, retry, model preferences)
+ * - TgSettingsManager: Simple settings for tg (compaction, retry, model preferences)
  */
 
 import type { UserMessage } from "@mariozechner/pi-ai";
@@ -31,20 +31,20 @@ interface LogMessage {
 /**
  * Sync user messages from log.jsonl to SessionManager.
  *
- * This ensures that messages logged while mom wasn't running (channel chatter,
+ * This ensures that messages logged while tg wasn't running (chat chatter,
  * backfilled messages, messages while busy) are added to the LLM context.
  *
  * @param sessionManager - The SessionManager to sync to
- * @param channelDir - Path to channel directory containing log.jsonl
- * @param excludeSlackTs - Slack timestamp of current message (will be added via prompt(), not sync)
+ * @param chatDir - Path to chat directory containing log.jsonl
+ * @param excludeMessageTs - Telegram message ID of current message (will be added via prompt(), not sync)
  * @returns Number of messages synced
  */
 export function syncLogToSessionManager(
 	sessionManager: SessionManager,
-	channelDir: string,
-	excludeSlackTs?: string,
+	chatDir: string,
+	excludeMessageTs?: string,
 ): number {
-	const logFile = join(channelDir, "log.jsonl");
+	const logFile = join(chatDir, "log.jsonl");
 
 	if (!existsSync(logFile)) return 0;
 
@@ -61,7 +61,7 @@ export function syncLogToSessionManager(
 					// Format: [YYYY-MM-DD HH:MM:SS+HH:MM] [username]: text
 					let normalized = content.replace(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\] /, "");
 					// Strip attachments section
-					const attachmentsIdx = normalized.indexOf("\n\n<slack_attachments>\n");
+					const attachmentsIdx = normalized.indexOf("\n\n<telegram_attachments>\n");
 					if (attachmentsIdx !== -1) {
 						normalized = normalized.substring(0, attachmentsIdx);
 					}
@@ -77,7 +77,7 @@ export function syncLogToSessionManager(
 						) {
 							let normalized = (part as { type: "text"; text: string }).text;
 							normalized = normalized.replace(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\] /, "");
-							const attachmentsIdx = normalized.indexOf("\n\n<slack_attachments>\n");
+							const attachmentsIdx = normalized.indexOf("\n\n<telegram_attachments>\n");
 							if (attachmentsIdx !== -1) {
 								normalized = normalized.substring(0, attachmentsIdx);
 							}
@@ -99,12 +99,12 @@ export function syncLogToSessionManager(
 		try {
 			const logMsg: LogMessage = JSON.parse(line);
 
-			const slackTs = logMsg.ts;
+			const messageTs = logMsg.ts;
 			const date = logMsg.date;
-			if (!slackTs || !date) continue;
+			if (!messageTs || !date) continue;
 
 			// Skip the current message being processed (will be added via prompt())
-			if (excludeSlackTs && slackTs === excludeSlackTs) continue;
+			if (excludeMessageTs && messageTs === excludeMessageTs) continue;
 
 			// Skip bot messages - added through agent flow
 			if (logMsg.isBot) continue;
@@ -142,55 +142,55 @@ export function syncLogToSessionManager(
 }
 
 // ============================================================================
-// MomSettingsManager - Simple settings for mom
+// TgSettingsManager - Simple settings for tg
 // ============================================================================
 
-export interface MomCompactionSettings {
+export interface TgCompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
 }
 
-export interface MomRetrySettings {
+export interface TgRetrySettings {
 	enabled: boolean;
 	maxRetries: number;
 	baseDelayMs: number;
 }
 
-export interface MomSettings {
+export interface TgSettings {
 	defaultProvider?: string;
 	defaultModel?: string;
 	defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
-	compaction?: Partial<MomCompactionSettings>;
-	retry?: Partial<MomRetrySettings>;
+	compaction?: Partial<TgCompactionSettings>;
+	retry?: Partial<TgRetrySettings>;
 }
 
-const DEFAULT_COMPACTION: MomCompactionSettings = {
+const DEFAULT_COMPACTION: TgCompactionSettings = {
 	enabled: true,
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
 };
 
-const DEFAULT_RETRY: MomRetrySettings = {
+const DEFAULT_RETRY: TgRetrySettings = {
 	enabled: true,
 	maxRetries: 3,
 	baseDelayMs: 2000,
 };
 
 /**
- * Settings manager for mom.
+ * Settings manager for tg.
  * Stores settings in the workspace root directory.
  */
-export class MomSettingsManager {
+export class TgSettingsManager {
 	private settingsPath: string;
-	private settings: MomSettings;
+	private settings: TgSettings;
 
 	constructor(workspaceDir: string) {
 		this.settingsPath = join(workspaceDir, "settings.json");
 		this.settings = this.load();
 	}
 
-	private load(): MomSettings {
+	private load(): TgSettings {
 		if (!existsSync(this.settingsPath)) {
 			return {};
 		}
@@ -215,7 +215,7 @@ export class MomSettingsManager {
 		}
 	}
 
-	getCompactionSettings(): MomCompactionSettings {
+	getCompactionSettings(): TgCompactionSettings {
 		return {
 			...DEFAULT_COMPACTION,
 			...this.settings.compaction,
@@ -231,7 +231,7 @@ export class MomSettingsManager {
 		this.save();
 	}
 
-	getRetrySettings(): MomRetrySettings {
+	getRetrySettings(): TgRetrySettings {
 		return {
 			...DEFAULT_RETRY,
 			...this.settings.retry,
@@ -266,29 +266,29 @@ export class MomSettingsManager {
 	}
 
 	setDefaultThinkingLevel(level: string): void {
-		this.settings.defaultThinkingLevel = level as MomSettings["defaultThinkingLevel"];
+		this.settings.defaultThinkingLevel = level as TgSettings["defaultThinkingLevel"];
 		this.save();
 	}
 
 	// Compatibility methods for AgentSession
 	getSteeringMode(): "all" | "one-at-a-time" {
-		return "one-at-a-time"; // Mom processes one message at a time
+		return "one-at-a-time"; // Tg processes one message at a time
 	}
 
 	setSteeringMode(_mode: "all" | "one-at-a-time"): void {
-		// No-op for mom
+		// No-op for tg
 	}
 
 	getFollowUpMode(): "all" | "one-at-a-time" {
-		return "one-at-a-time"; // Mom processes one message at a time
+		return "one-at-a-time"; // Tg processes one message at a time
 	}
 
 	setFollowUpMode(_mode: "all" | "one-at-a-time"): void {
-		// No-op for mom
+		// No-op for tg
 	}
 
 	getHookPaths(): string[] {
-		return []; // Mom doesn't use hooks
+		return []; // Tg doesn't use hooks
 	}
 
 	getHookTimeout(): number {
