@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
-import { TgSettingsManager, syncLogToSessionManager } from "./context.js";
+import { MomSettingsManager, syncLogToSessionManager } from "./context.js";
 import * as log from "./log.js";
 import { getApiKey, loadSettings, resolveModel } from "./models.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
@@ -261,7 +261,7 @@ You receive a message like:
 Immediate and one-shot events auto-delete after triggering. Periodic events persist until you delete them.
 
 ### Silent Completion
-For periodic events where there's nothing to report, respond with just \`[SILENT]\` (no other text). This deletes the status message and posts nothing to Slack. Use this to avoid spamming the channel when periodic checks find nothing actionable.
+For periodic events where there's nothing to report, respond with just \`[SILENT]\` (no other text). This deletes the status message and posts nothing to Telegram. Use this to avoid spamming the chat when periodic checks find nothing actionable.
 
 ### Debouncing
 When writing programs that create immediate events (email watchers, webhook handlers, etc.), always debounce. If 50 emails arrive in a minute, don't create 50 immediate events. Instead collect events over a window and create ONE immediate event summarizing what happened, or just signal "new activity, check inbox" rather than per-item events. Or simpler: use a periodic event to check for new items every N minutes instead of immediate events.
@@ -272,7 +272,7 @@ Maximum 5 events can be queued. Don't create excessive immediate or periodic eve
 ## Memory
 Write to MEMORY.md files to persist context across conversations.
 - Global (${workspacePath}/MEMORY.md): skills, preferences, project info
-- Channel (${channelPath}/MEMORY.md): channel-specific decisions, ongoing work
+- Chat (${chatPath}/MEMORY.md): chat-specific decisions, ongoing work
 Update when you learn something important or when asked to remember something.
 
 ### Current Memory
@@ -308,7 +308,7 @@ grep '"userName":"mario"' log.jsonl | tail -20 | jq -c '{date: .date[0:19], text
 - read: Read files
 - write: Create/overwrite files
 - edit: Surgical file edits
-- attach: Share files to Slack
+- attach: Share files to Telegram
 
 Each tool requires a "label" parameter (shown to user).
 `;
@@ -345,7 +345,7 @@ function extractToolResultText(result: unknown): string {
 	return JSON.stringify(result);
 }
 
-function formatToolArgsForSlack(_toolName: string, args: Record<string, unknown>): string {
+function formatToolArgsForTelegram(_toolName: string, args: Record<string, unknown>): string {
 	const lines: string[] = [];
 
 	for (const [key, value] of Object.entries(args)) {
@@ -399,12 +399,12 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const workspacePath = executor.getWorkspacePath(channelDir.replace(`/${channelId}`, ""));
 
 	// Create tools
-	const tools = createMomTools(executor);
+	const tools = createTgTools(executor);
 
-	// Initial system prompt (will be updated each run with fresh memory/channels/users/skills)
+	// Initial system prompt (will be updated each run with fresh memory/skills)
 	const memory = getMemory(channelDir);
-	const skills = loadMomSkills(channelDir, workspacePath);
-	const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, sandboxConfig, [], [], skills);
+	const skills = loadTgSkills(channelDir, workspacePath);
+	const systemPrompt = buildSystemPrompt(workspacePath, channelId, memory, sandboxConfig, skills);
 
 	// Create session manager and settings manager
 	// Use a fixed context.jsonl file per channel (not timestamped like coding-agent)
@@ -414,8 +414,12 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 	// Create AuthStorage and ModelRegistry
 	// Auth stored outside workspace so agent can't access it
-	const authStorage = new AuthStorage(join(homedir(), ".pi", "mom", "auth.json"));
+	const authStorage = new AuthStorage(join(homedir(), ".pi", "tg", "auth.json"));
 	const modelRegistry = new ModelRegistry(authStorage);
+
+	// Load settings for model resolution
+	const settings = loadSettings(join(channelDir, ".."));
+	const model = resolveModel(settings);
 
 	// Create agent
 	const agent = new Agent({
@@ -426,7 +430,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			tools,
 		},
 		convertToLlm,
-		getApiKey: async () => getAnthropicApiKey(authStorage),
+		getApiKey: async () => getProviderApiKey(settings.model.provider, authStorage),
 	});
 
 	// Load existing messages
@@ -463,7 +467,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 	// Mutable per-run state - event handler references this
 	const runState = {
-		ctx: null as SlackContext | null,
+		ctx: null as TelegramContext | null,
 		logCtx: null as { channelId: string; userName?: string; channelName?: string } | null,
 		queue: null as {
 			enqueue(fn: () => Promise<void>, errorContext: string): void;
@@ -500,7 +504,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			});
 
 			log.logToolStart(logCtx, agentEvent.toolName, label, agentEvent.args as Record<string, unknown>);
-			queue.enqueue(() => ctx.respond(`_→ ${label}_`, false), "tool label");
+			queue.enqueue(() => ctx.respond(`_→ ${label}_`), "tool label");
 		} else if (event.type === "tool_execution_end") {
 			const agentEvent = event as AgentEvent & { type: "tool_execution_end" };
 			const resultStr = extractToolResultText(agentEvent.result);
@@ -518,7 +522,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			// Post args + result to thread
 			const label = pending?.args ? (pending.args as { label?: string }).label : undefined;
 			const argsFormatted = pending
-				? formatToolArgsForSlack(agentEvent.toolName, pending.args as Record<string, unknown>)
+				? formatToolArgsForTelegram(agentEvent.toolName, pending.args as Record<string, unknown>)
 				: "(args not found)";
 			const duration = (durationMs / 1000).toFixed(1);
 			let threadMessage = `*${agentEvent.isError ? "✗" : "✓"} ${agentEvent.toolName}*`;
@@ -530,7 +534,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			queue.enqueueMessage(threadMessage, "thread", "tool result thread", false);
 
 			if (agentEvent.isError) {
-				queue.enqueue(() => ctx.respond(`_Error: ${truncate(resultStr, 200)}_`, false), "tool error");
+				queue.enqueue(() => ctx.respond(`_Error: ${truncate(resultStr, 200)}_`), "tool error");
 			}
 		} else if (event.type === "message_start") {
 			const agentEvent = event as AgentEvent & { type: "message_start" };
@@ -588,7 +592,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			}
 		} else if (event.type === "auto_compaction_start") {
 			log.logInfo(`Auto-compaction started (reason: ${(event as any).reason})`);
-			queue.enqueue(() => ctx.respond("_Compacting context..._", false), "compaction start");
+			queue.enqueue(() => ctx.respond("_Compacting context..._"), "compaction start");
 		} else if (event.type === "auto_compaction_end") {
 			const compEvent = event as any;
 			if (compEvent.result) {
@@ -600,22 +604,22 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			const retryEvent = event as any;
 			log.logWarning(`Retrying (${retryEvent.attempt}/${retryEvent.maxAttempts})`, retryEvent.errorMessage);
 			queue.enqueue(
-				() => ctx.respond(`_Retrying (${retryEvent.attempt}/${retryEvent.maxAttempts})..._`, false),
+				() => ctx.respond(`_Retrying (${retryEvent.attempt}/${retryEvent.maxAttempts})..._`),
 				"retry",
 			);
 		}
 	});
 
-	// Slack message limit
-	const SLACK_MAX_LENGTH = 40000;
-	const splitForSlack = (text: string): string[] => {
-		if (text.length <= SLACK_MAX_LENGTH) return [text];
+	// Telegram message limit
+	const TELEGRAM_MAX_LENGTH = 40000;
+	const splitForTelegram = (text: string): string[] => {
+		if (text.length <= TELEGRAM_MAX_LENGTH) return [text];
 		const parts: string[] = [];
 		let remaining = text;
 		let partNum = 1;
 		while (remaining.length > 0) {
-			const chunk = remaining.substring(0, SLACK_MAX_LENGTH - 50);
-			remaining = remaining.substring(SLACK_MAX_LENGTH - 50);
+			const chunk = remaining.substring(0, TELEGRAM_MAX_LENGTH - 50);
+			remaining = remaining.substring(TELEGRAM_MAX_LENGTH - 50);
 			const suffix = remaining.length > 0 ? `\n_(continued ${partNum}...)_` : "";
 			parts.push(chunk + suffix);
 			partNum++;
@@ -625,8 +629,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 	return {
 		async run(
-			ctx: SlackContext,
-			_store: ChannelStore,
+			ctx: TelegramContext,
 			_pendingMessages?: PendingMessage[],
 		): Promise<{ stopReason: string; errorMessage?: string }> {
 			// Ensure channel directory exists
@@ -634,7 +637,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 			// Sync messages from log.jsonl that arrived while we were offline or busy
 			// Exclude the current message (it will be added via prompt())
-			const syncedCount = syncLogToSessionManager(sessionManager, channelDir, ctx.message.ts);
+			const syncedCount = syncLogToSessionManager(sessionManager, channelDir, String(ctx.message.messageId));
 			if (syncedCount > 0) {
 				log.logInfo(`[${channelId}] Synced ${syncedCount} messages from log.jsonl`);
 			}
@@ -647,16 +650,14 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				log.logInfo(`[${channelId}] Reloaded ${reloadedSession.messages.length} messages from context`);
 			}
 
-			// Update system prompt with fresh memory, channel/user info, and skills
+			// Update system prompt with fresh memory and skills
 			const memory = getMemory(channelDir);
-			const skills = loadMomSkills(channelDir, workspacePath);
+			const skills = loadTgSkills(channelDir, workspacePath);
 			const systemPrompt = buildSystemPrompt(
 				workspacePath,
 				channelId,
 				memory,
 				sandboxConfig,
-				ctx.channels,
-				ctx.users,
 				skills,
 			);
 			session.agent.setSystemPrompt(systemPrompt);
@@ -670,9 +671,9 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			// Reset per-run state
 			runState.ctx = ctx;
 			runState.logCtx = {
-				channelId: ctx.message.channel,
+				channelId: String(ctx.message.chatId),
 				userName: ctx.message.userName,
-				channelName: ctx.channelName,
+				channelName: undefined,
 			};
 			runState.pendingTools.clear();
 			runState.totalUsage = {
@@ -694,7 +695,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 							await fn();
 						} catch (err) {
 							const errMsg = err instanceof Error ? err.message : String(err);
-							log.logWarning(`Slack API error (${errorContext})`, errMsg);
+							log.logWarning(`Telegram API error (${errorContext})`, errMsg);
 							try {
 								await ctx.respondInThread(`_Error: ${errMsg}_`);
 							} catch {
@@ -703,11 +704,11 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 						}
 					});
 				},
-				enqueueMessage(text: string, target: "main" | "thread", errorContext: string, doLog = true): void {
-					const parts = splitForSlack(text);
+				enqueueMessage(text: string, target: "main" | "thread", errorContext: string, _doLog = true): void {
+					const parts = splitForTelegram(text);
 					for (const part of parts) {
 						this.enqueue(
-							() => (target === "main" ? ctx.respond(part, doLog) : ctx.respondInThread(part)),
+							() => (target === "main" ? ctx.respond(part) : ctx.respondInThread(part)),
 							errorContext,
 						);
 					}
@@ -716,7 +717,6 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 
 			// Log context info
 			log.logInfo(`Context sizes - system: ${systemPrompt.length} chars, memory: ${memory.length} chars`);
-			log.logInfo(`Channels: ${ctx.channels.length}, Users: ${ctx.users.length}`);
 
 			// Build user message with timestamp and username prefix
 			// Format: "[YYYY-MM-DD HH:MM:SS+HH:MM] [username]: message" so LLM knows when and who
@@ -752,7 +752,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			}
 
 			if (nonImagePaths.length > 0) {
-				userMessage += `\n\n<slack_attachments>\n${nonImagePaths.join("\n")}\n</slack_attachments>`;
+				userMessage += `\n\n<telegram_attachments>\n${nonImagePaths.join("\n")}\n</telegram_attachments>`;
 			}
 
 			// Debug: write context to last_prompt.jsonl
@@ -800,8 +800,8 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				} else if (finalText.trim()) {
 					try {
 						const mainText =
-							finalText.length > SLACK_MAX_LENGTH
-								? `${finalText.substring(0, SLACK_MAX_LENGTH - 50)}\n\n_(see thread for full response)_`
+							finalText.length > TELEGRAM_MAX_LENGTH
+								? `${finalText.substring(0, TELEGRAM_MAX_LENGTH - 50)}\n\n_(see thread for full response)_`
 								: finalText;
 						await ctx.replaceMessage(mainText);
 					} catch (err) {
@@ -826,7 +826,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 						lastAssistantMessage.usage.cacheRead +
 						lastAssistantMessage.usage.cacheWrite
 					: 0;
-				const contextWindow = model.contextWindow || 200000;
+				const contextWindow = model?.contextWindow || 200000;
 
 				const summary = log.logUsageSummary(runState.logCtx!, runState.totalUsage, contextTokens, contextWindow);
 				runState.queue.enqueue(() => ctx.respondInThread(summary), "usage summary");
