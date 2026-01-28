@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
-import { MomSettingsManager, syncLogToSessionManager } from "./context.js";
+import { TgSettingsManager, syncLogToSessionManager } from "./context.js";
 import * as log from "./log.js";
 import { getApiKey, loadSettings, resolveModel } from "./models.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
@@ -410,7 +410,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	// Use a fixed context.jsonl file per channel (not timestamped like coding-agent)
 	const contextFile = join(channelDir, "context.jsonl");
 	const sessionManager = SessionManager.open(contextFile, channelDir);
-	const settingsManager = new MomSettingsManager(join(channelDir, ".."));
+	const settingsManager = new TgSettingsManager(join(channelDir, ".."));
 
 	// Create AuthStorage and ModelRegistry
 	// Auth stored outside workspace so agent can't access it
