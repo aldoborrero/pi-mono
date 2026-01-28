@@ -45,7 +45,8 @@ export function resolveModel(settings: TgSettings): Model<Api> | undefined {
 	const { provider, id } = settings.model;
 
 	try {
-		return getModel(provider, id);
+		// Cast to any since getModel will throw if provider/model is invalid
+		return getModel(provider as any, id);
 	} catch (error) {
 		log.logWarning(`Failed to resolve model ${provider}/${id}`, String(error));
 
@@ -54,7 +55,7 @@ export function resolveModel(settings: TgSettings): Model<Api> | undefined {
 			for (const fallback of settings.fallbackModels) {
 				try {
 					log.logInfo(`Trying fallback model: ${fallback.provider}/${fallback.id}`);
-					return getModel(fallback.provider, fallback.id);
+					return getModel(fallback.provider as any, fallback.id);
 				} catch {
 					continue;
 				}
