@@ -10,7 +10,7 @@ export interface Attachment {
 
 export interface LoggedMessage {
 	date: string; // ISO 8601 date (e.g., "2025-11-26T10:44:00.000Z") for easy grepping
-	ts: string; // slack timestamp or epoch ms
+	ts: string; // message timestamp or epoch ms
 	user: string; // user ID (or "bot" for bot responses)
 	userName?: string; // handle (e.g., "mario")
 	displayName?: string; // display name (e.g., "Mario Zechner")
@@ -64,7 +64,7 @@ export class ChannelStore {
 	 * Generate a unique local filename for an attachment
 	 */
 	generateLocalFilename(originalName: string, timestamp: string): string {
-		// Convert slack timestamp (1234567890.123456) to milliseconds
+		// Convert timestamp to milliseconds (handles both decimal and integer formats)
 		const ts = Math.floor(parseFloat(timestamp) * 1000);
 		// Sanitize original name (remove problematic characters)
 		const sanitized = originalName.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -72,7 +72,7 @@ export class ChannelStore {
 	}
 
 	/**
-	 * Process attachments from a Slack message event
+	 * Process attachments from a Telegram message event
 	 * Returns attachment metadata and queues downloads
 	 */
 	processAttachments(
@@ -130,7 +130,7 @@ export class ChannelStore {
 			// Parse timestamp to get date
 			let date: Date;
 			if (message.ts.includes(".")) {
-				// Slack timestamp format (1234567890.123456)
+				// Decimal timestamp format (1234567890.123456)
 				date = new Date(parseFloat(message.ts) * 1000);
 			} else {
 				// Epoch milliseconds
