@@ -1,0 +1,54 @@
+{
+  "name": "@mariozechner/pi-tg",
+  "version": "0.50.0",
+  "description": "Telegram bot powered by pi agent",
+  "type": "module",
+  "bin": {
+    "pi-tg": "dist/main.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsgo -p tsconfig.build.json && chmod +x dist/main.js",
+    "dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "^0.0.16",
+    "@mariozechner/pi-agent-core": "^0.50.0",
+    "@mariozechner/pi-ai": "^0.50.0",
+    "@mariozechner/pi-coding-agent": "^0.50.0",
+    "@sinclair/typebox": "^0.34.0",
+    "chalk": "^5.6.2",
+    "croner": "^9.1.0",
+    "diff": "^8.0.2",
+    "grammy": "^1.35.0",
+    "openai": "^4.77.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.3"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "ai",
+    "agent"
+  ],
+  "author": "Mario Zechner",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/badlogic/pi-mono.git",
+    "directory": "packages/tg"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
