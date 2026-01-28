@@ -109,7 +109,7 @@ function getState(chatId: number): ChatState {
 		state = {
 			running: false,
 			runner: getOrCreateRunner(sandbox, String(chatId), chatDir),
-			store: new ChannelStore({ workingDir }),
+			store: new ChannelStore({ workingDir, botToken: TG_BOT_TOKEN! }),
 			stopRequested: false,
 		};
 		chatStates.set(chatId, state);
@@ -237,7 +237,8 @@ const handler: TgHandler = {
 					const transcription = await transcribeVoice(voiceAttachment.local);
 					event.text = `[Voice message]: ${transcription}`;
 				} catch (error) {
-					event.text = `[Voice message - transcription failed]: ${error}`;
+					const errorMsg = error instanceof Error ? error.message : String(error);
+					event.text = `[Voice message - transcription failed]: ${errorMsg}`;
 				}
 			}
 		}
@@ -287,18 +288,14 @@ const eventsWatcher = createEventsWatcher(workingDir, bot);
 eventsWatcher.start();
 
 // Handle shutdown
-process.on("SIGINT", () => {
+function shutdown() {
 	log.logInfo("Shutting down...");
 	eventsWatcher.stop();
 	bot.stop();
 	process.exit(0);
-});
+}
 
-process.on("SIGTERM", () => {
-	log.logInfo("Shutting down...");
-	eventsWatcher.stop();
-	bot.stop();
-	process.exit(0);
-});
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 bot.start();
