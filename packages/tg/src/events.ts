@@ -334,11 +334,12 @@ export class EventsWatcher {
 
 		// Create synthetic TelegramEvent
 		const syntheticEvent: TelegramEvent = {
-			type: "mention",
-			channel: event.channelId,
-			user: "EVENT",
+			type: "message",
+			chatId: parseInt(event.channelId, 10) || 0,
+			messageId: 0,
+			userId: 0,
+			userName: "EVENT",
 			text: message,
-			ts: Date.now().toString(),
 		};
 
 		// Enqueue for processing

@@ -56,10 +56,12 @@ export class TelegramBot {
 	private bot: Bot;
 	private handler: TgHandler;
 	private workingDir: string;
+	private token: string;
 
 	constructor(handler: TgHandler, options: { token: string; workingDir: string }) {
 		this.handler = handler;
 		this.workingDir = options.workingDir;
+		this.token = options.token;
 		this.bot = new Bot(options.token);
 
 		this.setupHandlers();
@@ -174,7 +176,7 @@ export class TelegramBot {
 			const file = await this.bot.api.getFile(fileId);
 			if (!file.file_path) return null;
 
-			const url = `https://api.telegram.org/file/bot${this.bot.token}/${file.file_path}`;
+			const url = `https://api.telegram.org/file/bot${this.token}/${file.file_path}`;
 			const response = await fetch(url);
 			if (!response.ok) return null;
 
@@ -271,8 +273,12 @@ export class TelegramBot {
 	}
 
 	// Method to enqueue events (for events.ts compatibility)
-	enqueueEvent(event: TelegramEvent): void {
+	enqueueEvent(event: TelegramEvent): boolean {
+		if (this.handler.isRunning(event.chatId)) {
+			return false;
+		}
 		this.handler.handleEvent(event, this, true);
+		return true;
 	}
 
 	start(): void {
