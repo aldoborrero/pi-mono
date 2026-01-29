@@ -46,6 +46,7 @@ export interface TgHandler {
 	isRunning(chatId: number): boolean;
 	handleEvent(event: TelegramEvent, bot: TelegramBot, isEvent?: boolean): Promise<void>;
 	handleStop(chatId: number, bot: TelegramBot): Promise<void>;
+	handleModelChange(chatId: number, modelSpec: string): { ok: boolean; message: string };
 }
 
 // ============================================================================
@@ -85,13 +86,13 @@ export class TelegramBot {
 
 		// Handle /model command
 		this.bot.command("model", async (ctx) => {
-			const args = ctx.message?.text?.split(" ").slice(1).join(" ");
+			const args = ctx.message?.text?.split(" ").slice(1).join(" ").trim();
 			if (!args) {
-				await ctx.reply("Usage: /model <provider/model-id>");
-			} else {
-				// TODO: Implement model switching
-				await ctx.reply(`Model switching not yet implemented`);
+				await ctx.reply("Usage: /model <provider/model-id>\nExample: /model anthropic/claude-sonnet-4-5");
+				return;
 			}
+			const result = this.handler.handleModelChange(ctx.chat.id, args);
+			await ctx.reply(result.message);
 		});
 
 		// Handle /cancel command (alias for /stop)

@@ -7,7 +7,7 @@ import * as log from "./log.js";
 import { parseSandboxArg, type SandboxConfig, validateSandbox } from "./sandbox.js";
 import { type TgHandler, type TelegramBot, TelegramBot as TelegramBotClass, type TelegramEvent } from "./telegram.js";
 import { ChannelStore } from "./store.js";
-import { loadSettings } from "./models.js";
+import { loadSettings, saveSettings, resolveModel } from "./models.js";
 import { transcribeVoice, isVoiceTranscriptionAvailable } from "./voice.js";
 
 // ============================================================================
@@ -224,6 +224,31 @@ const handler: TgHandler = {
 			state.runner.abort();
 			await bot.sendMessage(chatId, "_Stopping..._");
 		}
+	},
+
+	handleModelChange(chatId: number, modelSpec: string): { ok: boolean; message: string } {
+		const parts = modelSpec.split("/");
+		if (parts.length !== 2 || !parts[0] || !parts[1]) {
+			return { ok: false, message: "Invalid format. Use: /model provider/model-id\nExample: /model anthropic/claude-sonnet-4-5" };
+		}
+
+		const [provider, modelId] = parts;
+		const newSettings = { ...settings, model: { provider, id: modelId } };
+
+		// Validate the model resolves
+		const model = resolveModel(newSettings);
+		if (!model) {
+			return { ok: false, message: `Unknown model: ${provider}/${modelId}` };
+		}
+
+		// Persist and update runtime settings
+		settings.model = { provider, id: modelId };
+		saveSettings(workingDir, settings);
+
+		// Clear the runner for this chat so next run picks up new model
+		chatStates.delete(chatId);
+
+		return { ok: true, message: `Model changed to ${provider}/${modelId}` };
 	},
 
 	async handleEvent(event: TelegramEvent, bot: TelegramBot, isEvent?: boolean): Promise<void> {
